@@ -1,0 +1,88 @@
+on:
+  workflow_call:
+    inputs:
+      source-branch:
+        type: string
+        default: develop
+      tag-prefix:
+        type: string
+        default: v
+      timezone:
+        type: string
+        default: Asia/Seoul
+
+jobs:
+  release:
+    # target branch 에 merge 가 된 후에 실행시킬거임
+    if: >
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.ref == inputs.source-branch
+    runs-on: ubuntu-latest
+    permissions:
+      # 태그/릴리즈 생성하려면 권한 필요
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0      # 기존 태그 조회용
+
+      - name: Resolve version
+        id: ver
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+
+          # 1순위: PR 제목에서 x.y.z 찾기  (예: "[v1.2.0] API 스펙 개선")
+          VERSION=$(printf '%s' "$PR_TITLE" \
+            | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)
+
+          # 2순위: PR 본문에서 x.y.z 찾기   (예: "release: v1.2.0")
+          if [ -z "$VERSION" ]; then
+            VERSION=$(printf '%s' "$PR_BODY" \
+              | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)
+          fi
+
+          if [ -z "$VERSION" ]; then
+            echo "::error::PR 제목이나 본문에 x.y.z 형식의 버전이 없습니다. 예) [v1.2.0] API 스펙 개선"
+            exit 1
+          fi
+
+          TAG="v${VERSION#v}"
+
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::$TAG 태그가 이미 존재합니다. 버전을 올려서 다시 시도하세요."
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "발급할 태그: $TAG"
+
+      - name: Create tag & release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+
+          DATE=$(TZ=Asia/Seoul date '+%Y.%m.%d')
+
+          {
+            echo "${DATE} 배포버전"
+            echo ""
+            printf '%s\n' "${PR_BODY:-$PR_TITLE}"
+            echo ""
+            echo "---"
+            echo "PR #${PR_NUM} · ${PR_TITLE}"
+          } > notes.md
+
+          gh release create "$TAG" \
+            --target "$SHA" \
+            --title "$TAG" \
+            --notes-file notes.md

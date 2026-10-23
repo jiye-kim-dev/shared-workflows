@@ -1,9 +1,7 @@
 # shared-workflows
 모든 repository 에서 사용할 workflow 모음
 
-
 ---
-
 
 ## How to use
 
@@ -36,5 +34,12 @@ on:
 
 jobs:
   summary:
-    uses: jiye-kim-dev/shared-workflows/.github/workflows/pr-ticket-summary.yml@v1
+    uses: jiye-kim-dev/shared-workflows/.github/workflows/pr_ticket_summary.yml@v1
 ```
+
+--- 
+
+
+## List
+- pr_ticket_summery : Jira 티켓 기준으로 Commit Message 내용 취합
+- release_tag : Production 배포시 버전 관리를 위한 자동 태깅처리
