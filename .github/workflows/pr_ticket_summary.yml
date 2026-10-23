@@ -1,0 +1,57 @@
+name: PR ticket summary
+
+on:
+  workflow_call:
+    inputs:
+      ticket-prefix:
+        type: string
+        default: TICKET
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Group PR commits by ticket
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PREFIX: ${{ inputs.ticket-prefix }}
+        run: |
+          set -euo pipefail
+
+          if ! [[ "$PREFIX" =~ ^[A-Za-z0-9_]+$ ]]; then
+            echo "ticket-prefix는 영문/숫자/_ 만 가능합니다: $PREFIX" >&2
+            exit 1
+          fi
+
+          git log --no-merges --reverse --format='%s' "origin/${BASE_REF}..HEAD" \
+            | awk -v prefix="$PREFIX" '
+                BEGIN { re = "^\\[" prefix "-[0-9]+\\]" }
+                match($0, re) {
+                  key = substr($0, RSTART, RLENGTH)
+                  msg = substr($0, RLENGTH + 1)
+                  sub(/^ +/, "", msg)
+                  if (!(key in known)) { known[key] = 1; order[++n] = key }
+                  if (!((key SUBSEP msg) in dup)) {
+                    dup[key SUBSEP msg] = 1
+                    items[key] = items[key] "\n  - " msg
+                  }
+                }
+                END { for (i = 1; i <= n; i++) print order[i] items[order[i]] }
+              ' > result.txt
+
+          if [ ! -s result.txt ]; then
+            echo "(해당하는 커밋 없음)" > result.txt
+          fi
+
+          {
+            echo "### ${GITHUB_HEAD_REF} → ${BASE_REF} 커밋 요약"
+            echo
+            echo '```'
+            cat result.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
