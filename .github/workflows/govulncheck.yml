@@ -52,6 +52,7 @@ jobs:
 
       - name: govulncheck
         id: vuln   # Slack 알림 스텝에서 steps.vuln.outcome으로 이 스텝의 결과를 참조
+        continue-on-error: ${{ github.event_name != 'pull_request' }}
         run: |
           go run golang.org/x/vuln/cmd/govulncheck@latest -format json ${{ inputs.go-package }} > govulncheck.json
           jq -rs '
