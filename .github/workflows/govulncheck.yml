@@ -1,0 +1,56 @@
+name: govulncheck (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      goprivate:
+        description: "GOPRIVATE 패턴. 비워 두면 private 모듈 설정을 건너뜀"
+        type: string
+        default: ""
+      go-package:
+        type: string
+        default: "./..."
+    secrets:
+      go-private-token:
+        required: false
+      slack-webhook-url:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: ${{ inputs.goprivate }}
+      SLACK_WEBHOOK_URL: ${{ secrets.slack-webhook-url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Private 모듈 접근 설정
+        if: inputs.goprivate != ''
+        env:
+          TOKEN: ${{ secrets.go-private-token }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::goprivate를 지정했으면 go-private-token secret도 넘겨야 합니다"
+            exit 1
+          fi
+          git config --global \
+            url."https://x-access-token:${TOKEN}@github.com/${{ github.repository_owner }}/".insteadOf \
+            "https://github.com/${{ github.repository_owner }}/"
+
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ${{ inputs.go-package }}
+
+      - name: Slack 알림 (정기 실행 실패 시)
+        if: failure() && github.event_name == 'schedule' && env.SLACK_WEBHOOK_URL != ''
+        run: |
+          curl -sS -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\":rotating_light: ${{ github.repository }} govulncheck 실패: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+            "$SLACK_WEBHOOK_URL"
