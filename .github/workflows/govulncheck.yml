@@ -76,12 +76,13 @@ jobs:
           && env.SLACK_WEBHOOK_URL != ''
         env:
           VULN_OUTCOME: ${{ steps.vuln.outcome }}
+          VULN_FOUND: ${{ steps.vuln.outputs.found }}
           TRIGGER: ${{ github.event_name == 'schedule' && '정기' || '수동' }}
         run: |
           run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           repo="${{ github.repository }}"
 
-          if [ "$VULN_FOUND" = "true" ]; then
+          if [ "$VULN_FOUND" = "true" ] || [ -s findings.txt ]; then
             count=$(grep -c '^•' findings.txt)
             header=":rotating_light: *${repo}* 취약점 ${count}건 (${TRIGGER})"
             body=$(head -c 2500 findings.txt)
