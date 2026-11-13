@@ -43,3 +43,4 @@ jobs:
 ## List
 - pr_ticket_summery : Jira 티켓 기준으로 Commit Message 내용 취합
 - release_tag : Production 배포시 버전 관리를 위한 자동 태깅처리
+- govulncheck : 주기적으로 govulncheck 요청
