@@ -59,7 +59,7 @@ jobs:
           if [ -s findings.txt ]; then exit 1; fi
 
       - name: Slack 알림
-        if: failure() && github.event_name == 'schedule' && env.SLACK_WEBHOOK_URL != ''
+        if: always() && github.event_name == 'schedule' && env.SLACK_WEBHOOK_URL != ''
         run: |
           run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           if [ -s findings.txt ]; then
