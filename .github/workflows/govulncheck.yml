@@ -22,13 +22,18 @@ permissions:
 jobs:
   govulncheck:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     env:
       GOPRIVATE: ${{ inputs.goprivate }}
       SLACK_WEBHOOK_URL: ${{ secrets.slack-webhook-url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -46,6 +51,7 @@ jobs:
             "https://github.com/${{ github.repository_owner }}/"
 
       - name: govulncheck
+        id: vuln   # Slack 알림 스텝에서 steps.vuln.outcome으로 이 스텝의 결과를 참조
         run: |
           go run golang.org/x/vuln/cmd/govulncheck@latest -format json ${{ inputs.go-package }} > govulncheck.json
           jq -rs '
@@ -59,16 +65,28 @@ jobs:
           if [ -s findings.txt ]; then exit 1; fi
 
       - name: Slack 알림
-        if: always() && github.event_name == 'schedule' && env.SLACK_WEBHOOK_URL != ''
+        if: >-
+          !cancelled()
+          && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+          && env.SLACK_WEBHOOK_URL != ''
+        env:
+          VULN_OUTCOME: ${{ steps.vuln.outcome }}
+          TRIGGER: ${{ github.event_name == 'schedule' && '정기' || '수동' }}
         run: |
           run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          if [ -s findings.txt ]; then
+          repo="${{ github.repository }}"
+
+          if [ "$VULN_OUTCOME" = "success" ]; then
+            header=":white_check_mark: *${repo}* 취약점 없음 (${TRIGGER})"
+            body=""
+          elif [ "$VULN_OUTCOME" = "failure" ] && [ -s findings.txt ]; then
             count=$(grep -c '^•' findings.txt)
-            header=":rotating_light: *${{ github.repository }}* 취약점 ${count}건"
+            header=":rotating_light: *${repo}* 취약점 ${count}건 (${TRIGGER})"
             body=$(head -c 2500 findings.txt)
           else
-            header=":warning: *${{ github.repository }}* govulncheck 실행 실패"
-            body="취약점이 아니라 실행 단계(빌드, 모듈 다운로드 등)에서 실패했습니다."
+            header=":warning: *${repo}* govulncheck 실행 실패 (${TRIGGER})"
+            body="취약점이 아니라 실행 단계(checkout, 빌드, 모듈 다운로드 등)에서 실패했습니다."
           fi
+
           jq -n --arg text "${header}"$'\n'"${body}"$'\n'"<${run_url}|실행 로그>" '{text: $text}' \
-            | curl -sS -X POST -H 'Content-type: application/json' --data @- "$SLACK_WEBHOOK_URL"
+            | curl -sS --fail-with-body -X POST -H 'Content-type: application/json' --data @- "$SLACK_WEBHOOK_URL"
