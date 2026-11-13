@@ -51,19 +51,21 @@ jobs:
             "https://github.com/${{ github.repository_owner }}/"
 
       - name: govulncheck
-        id: vuln   # Slack 알림 스텝에서 steps.vuln.outcome으로 이 스텝의 결과를 참조
-        continue-on-error: ${{ github.event_name != 'pull_request' }}
+        id: vuln
         run: |
           go run golang.org/x/vuln/cmd/govulncheck@latest -format json ${{ inputs.go-package }} > govulncheck.json
           jq -rs '
-            (map(select(.osv)) | map({key: .osv.id, value: .osv.summary}) | from_entries) as $summary
-            | [ .[] | select(.finding.trace[0].function) | .finding ]
-            | unique_by(.osv)
-            | .[]
-            | "• <https://pkg.go.dev/vuln/\(.osv)|\(.osv)> \($summary[.osv] // "")\n      \(.trace[0].module)@\(.trace[0].version // "?") → 수정 버전: \(.fixed_version // "없음")"
+            ... (기존 그대로)
           ' govulncheck.json > findings.txt
           cat findings.txt
-          if [ -s findings.txt ]; then exit 1; fi
+
+          if [ -s findings.txt ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            # PR에서는 머지를 막아야 하니 실패 처리
+            if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then exit 1; fi
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Slack 알림
         if: >-
