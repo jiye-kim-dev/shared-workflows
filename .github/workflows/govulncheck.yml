@@ -46,11 +46,29 @@ jobs:
             "https://github.com/${{ github.repository_owner }}/"
 
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ${{ inputs.go-package }}
+        run: |
+          go run golang.org/x/vuln/cmd/govulncheck@latest -format json ${{ inputs.go-package }} > govulncheck.json
+          jq -rs '
+            (map(select(.osv)) | map({key: .osv.id, value: .osv.summary}) | from_entries) as $summary
+            | [ .[] | select(.finding.trace[0].function) | .finding ]
+            | unique_by(.osv)
+            | .[]
+            | "• <https://pkg.go.dev/vuln/\(.osv)|\(.osv)> \($summary[.osv] // "")\n      \(.trace[0].module)@\(.trace[0].version // "?") → 수정 버전: \(.fixed_version // "없음")"
+          ' govulncheck.json > findings.txt
+          cat findings.txt
+          if [ -s findings.txt ]; then exit 1; fi
 
-      - name: Slack 알림 (정기 실행 실패 시)
+      - name: Slack 알림
         if: failure() && github.event_name == 'schedule' && env.SLACK_WEBHOOK_URL != ''
         run: |
-          curl -sS -X POST -H 'Content-type: application/json' \
-            --data "{\"text\":\":rotating_light: ${{ github.repository }} govulncheck 실패: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
-            "$SLACK_WEBHOOK_URL"
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          if [ -s findings.txt ]; then
+            count=$(grep -c '^•' findings.txt)
+            header=":rotating_light: *${{ github.repository }}* 취약점 ${count}건"
+            body=$(head -c 2500 findings.txt)
+          else
+            header=":warning: *${{ github.repository }}* govulncheck 실행 실패"
+            body="취약점이 아니라 실행 단계(빌드, 모듈 다운로드 등)에서 실패했습니다."
+          fi
+          jq -n --arg text "${header}"$'\n'"${body}"$'\n'"<${run_url}|실행 로그>" '{text: $text}' \
+            | curl -sS -X POST -H 'Content-type: application/json' --data @- "$SLACK_WEBHOOK_URL"
