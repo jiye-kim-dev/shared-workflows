@@ -28,20 +28,33 @@ jobs:
             exit 1
           fi
 
-          git log --no-merges --reverse --format='%s' "origin/${BASE_REF}..HEAD" \
+          git log --no-merges --reverse --format='%x1e%B' "origin/${BASE_REF}..HEAD" \
             | awk -v prefix="$PREFIX" '
-                BEGIN { re = "^\\[" prefix "-[0-9]+\\]" }
-                match($0, re) {
-                  key = substr($0, RSTART, RLENGTH)
-                  msg = substr($0, RLENGTH + 1)
-                  sub(/^ +/, "", msg)
-                  if (!(key in known)) { known[key] = 1; order[++n] = key }
-                  if (!((key SUBSEP msg) in dup)) {
-                    dup[key SUBSEP msg] = 1
-                    items[key] = items[key] "\n  - " msg
+                BEGIN { RS = "\036"; re = "^\\[" prefix "-[0-9]+\\]" }
+                NF == 0 { next }                      # 첫 구분자 앞의 빈 레코드 무시
+                {
+                  nl = split($0, line, "\n")
+                  title = line[1]
+                  if (!match(title, re)) next
+                  key = substr(title, RSTART, RLENGTH)
+                  msg = substr(title, RLENGTH + 1)
+                  sub(/^[ \t]+/, "", msg); sub(/[ \t\r]+$/, "", msg)
+                  if ((key SUBSEP msg) in dup) next   # 같은 제목의 커밋 중복 제거 (cherry-pick 등)
+                  dup[key SUBSEP msg] = 1
+                  if (!(key in known)) {              # 티켓의 첫 커밋: "[KEY] 제목"
+                    known[key] = 1; order[++n] = key
+                    out[key] = key (msg != "" ? " " msg : ""); ind = ""
+                  } else {                            # 같은 티켓의 다음 커밋: "- 제목"
+                    out[key] = out[key] "\n- " msg; ind = "  "
+                  }
+                  for (i = 2; i <= nl; i++) {         # 본문 줄은 작성한 그대로 유지
+                    l = line[i]; sub(/[ \t\r]+$/, "", l)
+                    if (l == "") continue
+                    if (tolower(l) ~ /^(co-authored-by|signed-off-by):/) continue
+                    out[key] = out[key] "\n" ind l
                   }
                 }
-                END { for (i = 1; i <= n; i++) print order[i] items[order[i]] }
+                END { for (i = 1; i <= n; i++) print out[order[i]] }
               ' > result.txt
 
           if [ ! -s result.txt ]; then
